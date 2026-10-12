@@ -47,6 +47,7 @@ black 6
 key 7 down
 turn K3 -10
 turn K4 3
+wait 1400
 shot 01_step_edit
 key 7 up
 expect step 6 7 1
@@ -87,12 +88,23 @@ release OCT+
 wait 2500
 shot 11_chain
 tap ARP
+# snapshot 1 = the kit now; turn the knobs; recall it and morph half way back
+key 16 down
+key 1
+key 16 up
+black 1
+turn K1 20
+turn K3 -30
+key 15 down
+key 1
+key 15 up
+turn ALGO -16
 shot 12_inst_play
-tap REC
+tap ARP
 key 1
 wait 300
 shot 13_inst_rec
-tap REC
+tap ARP
 tap HOME
 press HOME
 wait 800
@@ -100,6 +112,12 @@ release HOME
 shot 14_utility
 tap HOME
 theme 1
+tap REC
+press OCT+
+key 1
+release OCT+
+black 1
+wait 2000
 shot 20_alloy_playing
 tap FX
 shot 21_alloy_fx

@@ -135,6 +135,8 @@ void fm1_alnk0_irq(void)
         sq.cpu = (sq.cpu * 15u + us * 256u / (HALF_FRAMES * 1000000u / PZ_FS)) / 16u;
         if (fm1_audio_free_half() != half)
             audio_late++;
+        if (us * 100u > (HALF_FRAMES * 1000000u / PZ_FS) * 85u)
+            sq.overload = 700;                  /* over 85 % of the half: no reverb for ~0.5 s */
     }
     in_audio = 0;
 }
@@ -376,11 +378,13 @@ static void splash(void)                       /* the name, in the theme's colou
     lcd_sync();
 }
 
-/* the controls -> the UI (the main loop, ~1 kHz while idle) */
+/* the controls -> the UI (the main loop). Key presses are latched by the scan (fm1_input_note_edges), so
+ * a tap shorter than a screen redraw is still seen: down, then up if it is already released */
 static void input_poll(void)
 {
-    static uint32_t notes_prev;
-    uint32_t rel, pr = fm1_input_edges(&rel), notes = fm1_in.notes, ch = notes ^ notes_prev, b, i;
+    static uint32_t held;
+    uint32_t rel, pr = fm1_input_edges(&rel), b, i;
+    uint32_t taps = fm1_input_note_edges(), notes = fm1_in.notes;
     static const uint8_t ENC_MATRIX[NE] = {0, 1, 6, 2, 3, 4, 5};   /* VALUE ALGO PRESET K1..K4 */
     for (b = 0; b < NB; b++) {
         uint32_t m = 1u << BTN_MATRIX[b];
@@ -389,14 +393,39 @@ static void input_poll(void)
         if (rel & m)
             ui_btn(b, 0);
     }
-    if (ch) {
-        for (i = 0; i < 16u; i++)
-            if ((ch >> WHITE_KEY[i]) & 1u)
-                ui_white(i, (notes >> WHITE_KEY[i]) & 1u);
-        for (i = 0; i < 11u; i++)
-            if ((ch >> BLACK_KEY[i]) & 1u)
-                ui_black(i, (notes >> BLACK_KEY[i]) & 1u);
-        notes_prev = notes;
+    for (i = 0; i < 27u; i++) {
+        uint32_t m = 1u << i, down = (taps & m) || ((notes & m) && !(held & m)), up = (held & m || down) && !(notes & m);
+        int w = -1, k;
+        for (k = 0; k < 16; k++)
+            if (WHITE_KEY[k] == i)
+                w = k;
+        if ((taps & m) && (held & m)) {        /* released and pressed again between two polls */
+            if (w >= 0)
+                ui_white((uint32_t)w, 0);
+            else
+                for (k = 0; k < 11; k++)
+                    if (BLACK_KEY[k] == i)
+                        ui_black((uint32_t)k, 0);
+            held &= ~m;
+        }
+        if (down) {
+            if (w >= 0)
+                ui_white((uint32_t)w, 1);
+            else
+                for (k = 0; k < 11; k++)
+                    if (BLACK_KEY[k] == i)
+                        ui_black((uint32_t)k, 1);
+            held |= m;
+        }
+        if (up) {
+            if (w >= 0)
+                ui_white((uint32_t)w, 0);
+            else
+                for (k = 0; k < 11; k++)
+                    if (BLACK_KEY[k] == i)
+                        ui_black((uint32_t)k, 0);
+            held &= ~m;
+        }
     }
     for (i = 0; i < NE; i++) {
         int32_t d = fm1_enc_take(ENC_MATRIX[i]);

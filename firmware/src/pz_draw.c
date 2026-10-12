@@ -442,6 +442,7 @@ static void draw_param(void)
     h_u(sys.theme), h_u(ui.page), h_u(t), h_mem(k, sizeof *k), h_u(ui.held_w), h_u(ui.mode), h_u(ui.force);
     h_u(ui.toast_t ? 1u : 0u), h_mem(ui.toast, sizeof ui.toast), h_u(ui.cursor), h_u(ui.mix_bank);
     h_u(ui.sub_latch | ui.flam_latch << 1 | ui.acc_latch << 2 | ui.subtype << 4), h_u(init_arm);
+    h_u(sq.morph | sq.morph_to << 8 | ui.snap_layer << 16);
     if (ui.held_w)
         h_mem(PAT->s[sq.rec_sec][t], sizeof PAT->s[0][0]), h_mem(PAT->mo, sizeof PAT->mo);
     if (ui.page == PG_FX)
@@ -617,6 +618,12 @@ static void draw_param(void)
                 sz_cpy(right, "FLAM INPUT", sizeof right);
             } else if (ui.acc_latch) {
                 sz_cpy(right, "ACCENT INPUT", sizeof right);
+            } else if (ui.mode == M_PLAY && (sq.morph || ui.snap_layer)) {
+                sz_cpy(right, "MORPH S", sizeof right);
+                right[7] = (char)('1' + sq.morph_to);
+                right[8] = ' ';
+                fmt_u(right + 9, sq.morph * 100u / 127u);
+                sz_cat(right, "%");
             } else {
                 sz_cpy(right, "SHUFFLE ", sizeof right);
                 fmt_i(right + 8, PAT->shuffle, 1);
@@ -632,6 +639,15 @@ static void draw_param(void)
         knob(90, 186, k->decay, 0, 127, 0, b[1], "DECAY", tc);
         knob(150, 186, k->ctrl, 0, 127, 0, b[2], ct, tc);
         knob(210, 186, k->level, 0, 127, 0, b[3], "LEVEL", tc);
+        if (sq.morph && PAT->snap[sq.morph_to % PZ_NSNAP].used) {   /* where the morph has taken them */
+            static const int16_t KX[MP_N] = {30, 90, 150, 210};
+            uint32_t i;
+            for (i = 0; i < MP_N; i++) {
+                int32_t v = (int32_t)knob_val(t, i), a = v * 270 / 127, ang = 225 + a;
+                int32_t px = KX[i] + isin((uint32_t)ang) * 16 / 32768, py = 186 - isin((uint32_t)ang + 90u) * 16 / 32768;
+                disc(px, py, 2, T->light ? HEX(0xFFFFFF) : HEX(0xFFFFFF));
+            }
+        }
         break;
     }
     }
@@ -681,7 +697,10 @@ static void ui_leds(void)
             lv = i == sq.pat ? 2u : (i == sq.pat_next && blink(200)) ? 2u : 0u;
             break;
         case M_PLAY:
-            lv = i < 8u ? (sq.hit_flash[i] ? 2u : 1u) : (i < 11u && ui.roll) ? 2u : 0u;
+            if (ui.snap_layer)                 /* the snapshots: stored dim, the one in force lit */
+                lv = i < 8u ? (PAT->snap[i].used ? (sq.morph && sq.morph_to == i ? 2u : 1u) : 0u) : i >= 14u ? 2u : 0u;
+            else
+                lv = i < 8u ? (sq.hit_flash[i] ? 2u : 1u) : (i < 11u && ui.roll) ? 2u : 0u;
             break;
         case M_LOOP:
             lv = sq.loop_step == i ? 2u : (sq.playing && sq.tpos[0] == i) ? 1u : 0u;

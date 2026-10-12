@@ -5,7 +5,7 @@
  *   16 white keys   the 16 step pads (TR-REC), patterns (PTN SELECT), instrument pads (INST PLAY),
  *                   steps to loop (STEP LOOP)
  *   black keys 1-8  instrument select BD..T8 (TR-8S [BD]..[RC]); C#5 LAST, D#5 CLEAR, F#5 FILL
- *   PLAY REC SEQ ARP  START/STOP, TR-REC, PTN SELECT, INST PLAY (REC in INST PLAY = INST REC)
+ *   PLAY REC SEQ ARP  START/STOP, TR-REC, PTN SELECT, INST PLAY (ARP again: INST REC)
  *   OCT- = SHIFT, OCT+ = VARIATION (+ keys 1-8: A..H, several = a chain; 9, 10: FILL IN 1, 2)
  *   SEL = ACCENT, ENV = SUB (SHIFT: FLAM), LFO = MOTION, GLO = MUTE (tap: MIXER),
  *   EDIT = INST, FX = EFFECTS, SAVE = WRITE (SHIFT: COPY), HOME = main page (hold: UTILITY)
@@ -42,7 +42,8 @@ typedef struct {
     int8_t pat_first;                         /* PTN SELECT: first key held (range) */
     uint8_t clear_pat;                        /* PTN SELECT + CLEAR: the pattern armed for clearing */
     uint8_t roll;                             /* INST PLAY: roll key held (1, 2, 4), 0 none */
-    uint8_t pad_mod;                          /* INST PLAY: 1 flam, 2 weak, 3 accent, 4 alt held */
+    uint8_t pad_mod;                          /* INST PLAY: 1 flam, 2 weak, 3 accent held */
+    uint8_t snap_layer;                       /* INST PLAY: 2 = key 15 (recall) held, 3 = key 16 (store) held */
     uint8_t loop_latch;
     uint8_t mix_bank;                         /* mixer: tracks 1-4 / 5-8 */
     uint16_t pat_dirty, kit_dirty;
@@ -344,9 +345,6 @@ static void s_aud(char *b) { sz_cpy(b, OFFON[sys.audition & 1u], 4); }
 static int32_t g_asave(void) { return sys.autosave; }
 static void a_asave(int32_t d) { sys.autosave = d > 0; }
 static void s_asave(char *b) { sz_cpy(b, OFFON[sys.autosave & 1u], 4); }
-static int32_t g_led(void) { return sys.led; }
-static void a_led(int32_t d) { sys.led = (uint8_t)clampv(sys.led + d, 0, 2); }
-static void s_led(char *b) { static const char *const L[3] = {"LOW", "MID", "HIGH"}; sz_cpy(b, L[sys.led % 3u], 6); }
 static int32_t g_quant(void) { return sys.quant; }
 static void a_quant(int32_t d) { sys.quant = d > 0; }
 static void s_quant(char *b) { sz_cpy(b, sys.quant ? "ON (GRID)" : "OFF (FREE)", 12); }
@@ -366,7 +364,7 @@ static void s_init(char *b) { sz_cpy(b, init_arm ? "PRESS HOME" : "TURN TO ARM",
 static const item_t UTIL_ITEMS[] = {
     {"THEME", g_theme, a_theme, s_theme}, {"SYNC", g_sync, a_sync, s_sync}, {"CLOCK OUT", g_clk, a_clk, s_clk},
     {"NOTE OUT", g_nout, a_nout, s_nout}, {"MIDI CH", g_ch, a_ch, s_ch}, {"TEMPO SRC", g_tsrc, a_tsrc, s_tsrc},
-    {"PAD PREVIEW", g_aud, a_aud, s_aud}, {"AUTO SAVE", g_asave, a_asave, s_asave}, {"KEY LEDS", g_led, a_led, s_led},
+    {"PAD PREVIEW", g_aud, a_aud, s_aud}, {"AUTO SAVE", g_asave, a_asave, s_asave},
     {"REC QUANTIZE", g_quant, a_quant, s_quant}, {"USB AUDIO", g_ufull, a_ufull, s_ufull},
     {"INIT PATTERN", g_none, a_init, s_init}, {"VERSION", g_none, a_none, s_ver},
 };
@@ -407,24 +405,23 @@ static void ui_btn(uint32_t b, int down)
                 sq.req = sq.playing ? TP_STOP : TP_START;
             }
             break;
-        case B_REC:
-            if (ui.mode == M_PLAY)
-                ui.inst_rec ^= 1u;
-            else {
-                ui.mode = M_TRREC;
-                ui.inst_rec = 0;
-            }
+        case B_REC:                            /* TR-REC, from any mode */
+            ui.mode = M_TRREC;
+            ui.inst_rec = 0;
+            sq.loop_step = 0xFF;
             break;
         case B_SEQ:
             if (held(B_SHIFT))
                 ui.page = ui.page == PG_PTN ? PG_MAIN : PG_PTN, ui.cursor = 0;
             break;
-        case B_ARP:
+        case B_ARP:                            /* INST PLAY; pressed again: INST REC on / off */
             if (held(B_SHIFT))
                 ui.mode = M_LOOP;
             else if (ui.mode != M_PLAY) {
                 ui.mode = M_PLAY;
                 ui.inst_rec = 0;
+            } else {
+                ui.inst_rec ^= 1u;
             }
             break;
         case B_EDIT:
@@ -708,6 +705,37 @@ static void ui_white(uint32_t k, int down)
         pattern_select(k);
         return;
     case M_PLAY:
+        if (k < 8u && ui.snap_layer && down) {         /* TR-1000 SNAPSHOT: keys 1-8 */
+            snap_t *sn = &PAT->snap[k];
+            if (ui.snap_layer == 3u) {                 /* store: the knobs of every track */
+                uint32_t t;
+                for (t = 0; t < PZ_NTRK; t++) {
+                    sn->v[t][MP_TUNE] = (uint8_t)(kit.t[t].tune + 64);
+                    sn->v[t][MP_DECAY] = kit.t[t].decay;
+                    sn->v[t][MP_CTRL] = kit.t[t].ctrl;
+                    sn->v[t][MP_LEVEL] = kit.t[t].level;
+                }
+                sn->used = 1;
+                mark_pat();
+                toast("SNAPSHOT STORED", 0);
+            } else if (sn->used) {                     /* recall: all the way to it; again: back to the kit */
+                if (sq.morph_to == k && sq.morph == 127u) {
+                    sq.morph = 0;
+                    toast("SNAPSHOT OFF", 0);
+                } else {
+                    sq.morph_to = (uint8_t)k;
+                    sq.morph = 127;
+                    toast("SNAPSHOT ", 0);
+                    {
+                        char b[3] = {(char)('1' + k), 0, 0};
+                        sz_cat(ui.toast, b);
+                    }
+                }
+            } else {
+                toast("EMPTY SNAPSHOT", 0);
+            }
+            return;
+        }
         if (k < 8u) {
             if (down) {
                 uint32_t vel = ui.pad_mod == 2u ? 48u : ui.pad_mod == 3u ? 127u : 100u;
@@ -730,10 +758,10 @@ static void ui_white(uint32_t k, int down)
                 ui.roll = 0;
                 sq.roll_trk = 0;
             }
-        } else if (k >= 11u && k <= 14u) {             /* FLAM, WEAK, ACCENT, ALT pads */
+        } else if (k >= 11u && k <= 13u) {             /* FLAM, WEAK, ACCENT pads */
             ui.pad_mod = down ? (uint8_t)(k - 10u) : 0u;
-        } else if (k == 15u && down) {
-            sq.fill_req = 1;
+        } else if (k >= 14u) {                         /* SNAPSHOT layers: 15 recall, 16 store */
+            ui.snap_layer = down ? (uint8_t)(k - 12u) : 0u;
         }
         return;
     case M_LOOP:
@@ -1052,6 +1080,10 @@ static void ui_enc(uint32_t e, int32_t d)
         return;
     default:
         break;
+    }
+    if (ui.mode == M_PLAY && e == E_ALGO) {     /* MORPH: the kit <-> the snapshot last recalled */
+        sq.morph = (uint8_t)clampv((int32_t)sq.morph + accel(d) * 2, 0, 127);
+        return;
     }
     /* the main page */
     switch (e) {

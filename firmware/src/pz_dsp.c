@@ -417,6 +417,8 @@ static const inst_t INST[I_N] = {
 
 /* ----------------------------------------------------------- helpers --- */
 static inline int32_t mulq15(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 15); }
+/* both operands within +-32768: the product fits 32 bits */
+static inline int32_t mul16(int32_t a, int32_t b) { return (a * b) >> 15; }
 static inline int32_t mulq30(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 30); }
 static inline int32_t clampi(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -606,6 +608,8 @@ static void voice_trigger(voice_t *v, const hit_t *h)
             v->nlvl = v->nlvl * c / 64;
         else if (s->ctrl == CT_COLOR)
             v->o2lvl = clampi(v->o2lvl * c / 48 + (c > 64 ? (c - 64) * 100 : 0), 0, 32767);
+        v->cklvl = clampi(v->cklvl, 0, 32767);   /* (mul16 operands) */
+        v->nlvl = clampi(v->nlvl, 0, 32767);
         v->drive = s->drive;
         if (s->ctrl == CT_DRIVE)
             v->drive = clampi((int32_t)s->drive + cc * 2, 0, 127);
@@ -703,14 +707,14 @@ static void voice_render(voice_t *v, int32_t *out, uint32_t n)
                     o = (int32_t)((v->ph ^ (uint32_t)((int32_t)v->ph >> 31)) >> 15) - 32768;
                 else
                     o = (int32_t)v->ph < 0 ? -20000 : 20000;
-                tone = mulq15(o, mulq15(v->olvl, v->a >> 15));
+                tone = mul16(o, mul16(v->olvl, v->a >> 15));
                 if (v->o2r) {
                     int32_t o2;
                     if (v->wave == W_SQR)
                         o2 = (int32_t)v->ph2 < 0 ? -20000 : 20000;
                     else
                         o2 = sine_q15(v->ph2);
-                    tone += mulq15(o2, mulq15(v->o2lvl, v->a2 >> 15));
+                    tone += mul16(o2, mul16(v->o2lvl, v->a2 >> 15));
                     v->ph2 += (uint32_t)(((uint64_t)v->inc * v->o2r) >> 6);
                     v->a2 = mulq30(v->a2, v->a2k);
                 }
@@ -755,7 +759,7 @@ static void voice_render(voice_t *v, int32_t *out, uint32_t n)
                     else
                         v->n = mulq30(v->n, v->nk);
                 }
-                nz = mulq15(w, mulq15(v->nlvl, env >> 15));
+                nz = mulq15(w, mul16(v->nlvl, env >> 15));
             }
             /* filter */
             if (v->ft) {
@@ -769,7 +773,7 @@ static void voice_render(voice_t *v, int32_t *out, uint32_t n)
             /* click */
             if (v->src != N_CLAP && v->ck) {
                 int32_t w = (int32_t)xrand(&v->rnd) >> 17;
-                x += mulq15(w + (v->t < 8u ? 12000 : 0), mulq15(v->cklvl, v->ck >> 15));
+                x += mul16(w + (v->t < 8u ? 12000 : 0), mul16(v->cklvl, v->ck >> 15));
                 v->ck = mulq30(v->ck, v->ckk);
             }
             if (v->drive)
@@ -906,8 +910,8 @@ static inline void reverb_run(int32_t in, int32_t *ol, int32_t *or_)
             int16_t *b = &rv_comb[c][rv.off[c][k]];
             uint32_t p = rv.pos[c][k];
             int32_t y = b[p];
-            rv.lp[c][k] = y + mulq15(rv.lp[c][k] - y, rv.damp);
-            b[p] = (int16_t)clampi(in + mulq15(rv.lp[c][k], rv.fb), -32768, 32767);
+            rv.lp[c][k] = y + mul16(rv.lp[c][k] - y, rv.damp);
+            b[p] = (int16_t)clampi(in + mul16(rv.lp[c][k], rv.fb), -32768, 32767);
             if (++p >= rv.len[c][k])
                 p = 0;
             rv.pos[c][k] = (uint16_t)p;
@@ -974,7 +978,7 @@ static inline int32_t delay_run(int32_t in)
 static const char *const MFX_NAME[MFX_N] = {"FILTER", "DRIVE", "CRUSH", "COMP", "LO-FI", "ISOLATR"};
 static struct {
     svf_t f[2], g[2];
-    int32_t env, sh[2];
+    int32_t env, sh[2], cg;
     uint32_t shc;
     int32_t xf;                                /* on / off crossfade, Q15 */
 } mfx;
@@ -1045,12 +1049,14 @@ static void mfx_run(int32_t *l, int32_t *r, uint32_t n, uint32_t type, uint32_t 
         }
         if (type == MFX_COMP) {                /* peak compressor: CTRL = amount (threshold and makeup) */
             int32_t a = y[0] > 0 ? y[0] : -y[0], b = y[1] > 0 ? y[1] : -y[1], pk = a > b ? a : b;
-            int32_t thr = 32767 - (int32_t)ctrl * 200, g;
             mfx.env = pk > mfx.env ? mfx.env + ((pk - mfx.env) >> 4) : mfx.env - (mfx.env >> 11);
-            g = mfx.env > thr ? (int32_t)(((int64_t)thr << 15) / mfx.env) : 32767;
-            g = (int32_t)(((int64_t)g * (32768 + (int32_t)ctrl * 160)) >> 15);
-            y[0] = mulq15(y[0], g);
-            y[1] = mulq15(y[1], g);
+            if ((i & 7u) == 0u) {              /* the gain every 8 samples: no divide per sample */
+                int32_t thr = 32767 - (int32_t)ctrl * 200;
+                int32_t g = mfx.env > thr ? (int32_t)(((uint32_t)thr << 15) / (uint32_t)mfx.env) : 32767;
+                mfx.cg = (int32_t)(((int64_t)g * (32768 + (int32_t)ctrl * 160)) >> 15);
+            }
+            y[0] = mulq15(y[0], mfx.cg);
+            y[1] = mulq15(y[1], mfx.cg);
         }
         if (mfx.xf != target)
             mfx.xf += mfx.xf < target ? 64 : -64;

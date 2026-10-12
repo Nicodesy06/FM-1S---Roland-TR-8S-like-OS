@@ -1,0 +1,142 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     Copyright (C) 2026 PULSAR-8 contributors. The update protocol (fm1ota.js, fm1pkg.js) is SLOOP's / Felucca's,
+     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, GPL-3.0-only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PULSAR-8 installer</title>
+<style>
+  :root { --bg: #000; --panel: #111316; --line: #2a2e32; --fg: #f4f4f2; --dim: #8a9198; --accent: #9be22b; --red: #ff3a22; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 30px; letter-spacing: .04em; margin: 8px 0 2px; }
+  .stripe { display: flex; gap: 6px; margin: 10px 0 18px; }
+  .stripe i { flex: 1; height: 4px; }
+  .sub { color: var(--dim); margin: 0 0 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 14px 0; }
+  button { font: 600 15px/1 inherit; font-family: inherit; background: var(--accent); color: #0a0c08; border: 0; border-radius: 6px;
+           padding: 12px 18px; cursor: pointer; }
+  button:disabled { background: #2a2e32; color: var(--dim); cursor: default; }
+  progress { width: 100%; height: 10px; accent-color: var(--accent); }
+  #status { font-weight: 600; min-height: 1.5em; }
+  pre { background: #07080a; color: var(--dim); padding: 8px; border-radius: 6px; max-height: 160px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+  a { color: var(--accent); }
+  .warn { color: #ffcf6e; }
+  label { display: block; margin: 6px 0; }
+  input[type=file] { color: var(--dim); max-width: 100%; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PULSAR-8</h1>
+  <div class="stripe"><i style="background:#e8382d"></i><i style="background:#f2892b"></i><i style="background:#f5ce2a"></i><i style="background:#ede8da"></i></div>
+  <p class="sub">TR-style rhythm machine firmware for the M-VAVE FM-1 &mdash; installer</p>
+
+  <div class="card">
+    <p><b>1.</b> Use <b>Chrome</b> or <b>Edge</b> on a computer. Connect the FM-1 with a USB <b>data</b> cable, directly (no hub), and switch it on.
+       Close any other program that uses MIDI (DAW, M-UPGRADE, another installer tab).</p>
+    <p><b>2.</b> Choose the firmware: <span id="pkgname">the bundled PULSAR-8 package</span>.</p>
+    <label>Or another package (your own build, SLOOP, or the official FM-1 V15 file):
+      <input id="file" type="file" accept=".fwsc"></label>
+    <p><b>3.</b> Press Install and allow MIDI access. Do not unplug until it says it is done (about 2 minutes).</p>
+    <p><button id="go" disabled>Install</button></p>
+    <progress id="bar" max="100" value="0"></progress>
+    <p id="status">Loading the package&hellip;</p>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="card">
+    <p class="warn"><b>Beta, at your own risk.</b> PULSAR-8 replaces the firmware and the saved data area (SLOOP projects are overwritten).</p>
+    <p>If the FM-1 no longer starts: hold <b>OCT&minus;</b> alone while switching it on (<i>PULSAR-8 USB RESCUE</i>) and install again from this page.
+       Last resort: <a href="https://github.com/kurogedelic/FM-1-transporter">FM-1-transporter</a>.</p>
+    <p class="sub">The update protocol and the update loader are SLOOP's, based on Felucca by Leo Kuroshita / Hügelton Instruments (GPL-3.0).
+       M-VAVE and FM-1 are trademarks of their owners; PULSAR-8 is not affiliated with M-VAVE or Roland.</p>
+  </div>
+</main>
+<script type="module">
+import { productOf, logicalImage, sha256hex, validateStockPackage, STOCK_V15_PRODUCT } from "./fm1pkg.js";
+import { Updater } from "./fm1ota.js";
+
+const BUNDLED = { url: "../firmware/pulsar-1.0-beta.fwsc",
+                  sha256: "f1d317662cd0d035bf5a93a6699eb689ad775b9e5586fd10fd78e376b238294d" };
+const $ = (id) => document.getElementById(id);
+const say = (t) => { $("status").textContent = t; };
+const log = (t) => { $("log").textContent += t + "\n"; $("log").scrollTop = 1e9; };
+let pkg = null, writing = false;
+
+function accept(bytes, name) {
+  const product = productOf(bytes);
+  const loader = new TextDecoder("latin1").decode(bytes).includes("FELUCCA-LOADER-1");
+  if (!/^FM-1_9\d\d$/.test(product) || !loader) throw new Error(`${name}: not a PULSAR-8 / SLOOP package (identity ${product})`);
+  return { product, image: logicalImage(bytes), name };
+}
+
+async function loadBundled() {
+  try {
+    const r = await fetch(BUNDLED.url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const b = new Uint8Array(await r.arrayBuffer());
+    if (crypto.subtle && await sha256hex(b) !== BUNDLED.sha256) throw new Error("the download is damaged (SHA-256)");
+    pkg = accept(b, "pulsar-1.0-beta.fwsc");
+    $("pkgname").textContent = `${pkg.name} (${pkg.product})`;
+    say("Ready.");
+  } catch (e) { say(`No bundled package (${e.message}): choose a file.`); }
+  $("go").disabled = writing || !pkg;
+}
+
+$("file").addEventListener("change", async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  const b = new Uint8Array(await f.arrayBuffer());
+  try {
+    if (productOf(b) === STOCK_V15_PRODUCT) { pkg = { ...(await validateStockPackage(b)), name: f.name, stock: true }; }
+    else pkg = accept(b, f.name);
+    $("pkgname").textContent = `${pkg.name} (${pkg.product})`;
+    say("Ready.");
+  } catch (e) { pkg = null; say(e.message); }
+  $("go").disabled = writing || !pkg;
+});
+
+const STEP = { start: "Starting the update…", verify: "Checking the package…", loader: "Starting the update loader…",
+               write: "Writing…", reboot: "Restarting the FM-1…", done: "Done. Enjoy PULSAR-8." };
+const total = 74 + 1179;
+const step = (k, a) => {
+  log(`${k} ${a ?? ""}`);
+  if (STEP[k]) say(STEP[k]);
+  if (k === "verify") $("bar").value = Math.min(100, (a / total) * 100);
+  if (k === "write") $("bar").value = Math.min(100, ((74 + a) / total) * 100);
+  if (k === "done") $("bar").value = 100;
+};
+
+window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "An install is running."; } });
+
+$("go").addEventListener("click", async () => {
+  if (writing || !pkg) return;
+  if (!navigator.requestMIDIAccess) { say("This browser has no Web MIDI: use Chrome or Edge."); return; }
+  writing = true;
+  $("go").disabled = true;
+  try {
+    const midi = await navigator.requestMIDIAccess({ sysex: true });
+    const up = new Updater(midi, log);
+    const ota = await up.find((id) => /^ota-/i.test(id.model));
+    if (ota) {                                   /* already in update mode: finish the write */
+      ota.link.close();
+      say((await up.resume(pkg.image, step, pkg.stock ? { product: pkg.product } : {})) ? STEP.done : "Stopped: replug and press Install again.");
+    } else {
+      await up.install(pkg.image, pkg.product, step);
+    }
+  } catch (e) {
+    say(`Error: ${e.message}${e.detail ? " " + e.detail : ""}`);
+    log(String(e && e.stack || e));
+  }
+  writing = false;
+  $("go").disabled = !pkg;
+});
+
+loadBundled();
+</script>
+</body>
+</html>

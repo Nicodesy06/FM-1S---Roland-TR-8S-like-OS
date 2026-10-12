@@ -96,6 +96,9 @@ typedef struct {
     uint8_t beat;                              /* toggles on every quarter (UI: tempo LED) */
     uint32_t cpu;                              /* load estimate, 1/256 */
     volatile uint8_t req;                      /* from the UI: TP_* (the audio interrupt acts on it) */
+    volatile uint8_t morph;                    /* SNAPSHOT / MORPH: 0 = the kit, 127 = snapshot morph_to */
+    volatile uint8_t morph_to;
+    volatile uint16_t overload;                /* blocks left with the reverb bypassed (the render ran late) */
 } seq_t;
 enum { TP_NONE, TP_START, TP_STOP, TP_RESTART, TP_CONT };
 static seq_t sq;
@@ -397,15 +400,26 @@ static void ev_push(uint32_t t, int64_t when, const hit_t *h)
 
 static int trk_muted(uint32_t t) { return ((sq.mute >> t) & 1u) || (sq.solo && !((sq.solo >> t) & 1u)); }
 
-/* the hit parameters of track t from the kit and any motion */
+/* a knob value of track t (MP_*, 0..127) as the kit has it, morphed towards the snapshot (TR-1000) */
+static uint32_t knob_val(uint32_t t, uint32_t par)
+{
+    const kittrk_t *k = &kit.t[t];
+    int32_t a = par == MP_TUNE ? k->tune + 64 : par == MP_DECAY ? k->decay : par == MP_CTRL ? k->ctrl : k->level;
+    const snap_t *sn = &PAT->snap[sq.morph_to % PZ_NSNAP];
+    if (sq.morph && sn->used)
+        a += ((int32_t)sn->v[t][par] - a) * sq.morph / 127;
+    return (uint32_t)a;
+}
+
+/* the hit parameters of track t from the kit, any morph and any motion */
 static void hit_make(hit_t *h, uint32_t t, uint32_t vel, uint32_t alt)
 {
     const kittrk_t *k = &kit.t[t];
     h->inst = k->inst;
     h->alt = (uint8_t)alt;
-    h->tune = sq.mval[t][MP_TUNE] != 0xFF ? (int8_t)((int32_t)sq.mval[t][MP_TUNE] - 64) : k->tune;
-    h->decay = sq.mval[t][MP_DECAY] != 0xFF ? sq.mval[t][MP_DECAY] : k->decay;
-    h->ctrl = sq.mval[t][MP_CTRL] != 0xFF ? sq.mval[t][MP_CTRL] : k->ctrl;
+    h->tune = (int8_t)((int32_t)(sq.mval[t][MP_TUNE] != 0xFF ? sq.mval[t][MP_TUNE] : knob_val(t, MP_TUNE)) - 64);
+    h->decay = (uint8_t)(sq.mval[t][MP_DECAY] != 0xFF ? sq.mval[t][MP_DECAY] : knob_val(t, MP_DECAY));
+    h->ctrl = (uint8_t)(sq.mval[t][MP_CTRL] != 0xFF ? sq.mval[t][MP_CTRL] : knob_val(t, MP_CTRL));
     h->vel = (uint8_t)(vel > 127u ? 127u : vel < 1u ? 1u : vel);
 }
 
@@ -479,7 +493,7 @@ static void eval_step(uint32_t g)
                 continue;
         }
         vel = s->vel ? s->vel : (s->f & ST_WEAK) ? 48u : 100u;
-        if (p->acc[sec][pos])
+        if (p->acc[sec][loop < PZ_NSTEP ? loop : sstep])   /* the accent lane runs with the variation */
             vel += (127u - vel) * p->acc_lvl / 127u + p->acc_lvl / 8u;
         /* timing: START (track), micro (step), shuffle on the off-beat 16ths */
         off = ((int32_t)ts->start + s->micro) * (int32_t)st / 100;
@@ -509,9 +523,7 @@ static void eval_step(uint32_t g)
             }
         }
     }
-    /* advance the variation */
-    if (loop < PZ_NSTEP)
-        return;                                /* STEP LOOP: the variation stands still */
+    /* advance the variation (also under STEP LOOP: the pattern runs on underneath, as on a TR) */
     if (++sq.sec_step >= last) {
         uint32_t was_fill = sq.fill_on, old = sq.sec;
         static const uint8_t AF[] = {0, 2, 4, 8, 12, 16, 32};
@@ -696,14 +708,16 @@ static void mix_block(int32_t *out, uint32_t n)
     /* the transport */
     if (sq.playing) {
         uint64_t adv = sq.inc * n;
-        if (sys.sync && sq.ext_period) {       /* MIDI clock: follow its tempo, never run ahead of it */
-            uint64_t lim = ((uint64_t)sq.ext_clocks + 1u) * 40u << 32;
-            sq.inc = ((uint64_t)40u << 40) / sq.ext_period;   /* 40 ticks per clock period (Q8 samples) */
+        if (sys.sync) {                        /* MIDI clock: follow its tempo, never run ahead of it */
+            uint64_t lim = (uint64_t)sq.ext_clocks * 40u << 32;   /* the first clock after START is tick 0:
+                                                                      * the k-th one allows up to tick 40 k */
+            if (sq.ext_period)
+                sq.inc = ((uint64_t)40u << 40) / sq.ext_period;   /* 40 ticks per clock period (Q8 samples) */
             adv = sq.inc * n;
             if (sq.pos + adv > lim)
                 adv = sq.pos < lim ? lim - sq.pos : 0;
-            if (sq.pos + (80ull << 32) < ((uint64_t)sq.ext_clocks * 40u << 32))
-                adv += ((uint64_t)sq.ext_clocks * 40u << 32) - sq.pos - (40ull << 32);   /* far behind: catch up */
+            if (sq.pos + (80ull << 32) < lim)
+                adv = lim - sq.pos - (40ull << 32);   /* far behind (a dropped clock): catch up */
         }
         end = sq.pos + adv;
         /* evaluate the steps whose time (minus half a step) falls in this block */
@@ -786,6 +800,9 @@ static void mix_block(int32_t *out, uint32_t n)
                 done = off;
                 voice_trigger(v, &ev.h);
                 sq.hit_flash[t] = 6;
+#ifdef PZ_TEST_HOOK
+                PZ_TEST_HOOK(t, sq.pos + (uint64_t)off * sq.inc, &ev.h);
+#endif
                 /* choke: the closed hat closes the open one */
                 if (t + 1u < PZ_NTRK && ((kit.choke >> (t + 1u)) & 1u) && INST[kit.t[t + 1u].inst].cat == CAT_OH &&
                     INST[k->inst].cat == CAT_HH)
@@ -796,9 +813,13 @@ static void mix_block(int32_t *out, uint32_t n)
                 }
             }
         }
+        if (!v->on && !v->xf && !done) {      /* silent all block: nothing to mix */
+            v->meter -= v->meter >> 3;
+            continue;
+        }
         voice_render(v, trk_buf + done, n - done);
         /* level (motion), pan, sends */
-        lv = sq.mval[t][MP_LEVEL] != 0xFF ? sq.mval[t][MP_LEVEL] : k->level;
+        lv = sq.mval[t][MP_LEVEL] != 0xFF ? sq.mval[t][MP_LEVEL] : (int32_t)knob_val(t, MP_LEVEL);
         {
             int32_t target = LVL_Q15[lv & 127];
             int32_t step = (target - lvl_g[t]) / (int32_t)n;
@@ -828,7 +849,8 @@ static void mix_block(int32_t *out, uint32_t n)
         int32_t dlv = (int32_t)(sq.fxval[MF_DLYLVL] != 0xFF ? sq.fxval[MF_DLYLVL] : kit.dly_lvl) * 258;
         for (i = 0; i < n; i++) {
             int32_t l = 0, r = 0, d;
-            reverb_run(rev_in[i], &l, &r);
+            if (!sq.overload)
+                reverb_run(rev_in[i], &l, &r);     /* (an overloaded render sheds the reverb first) */
             d = delay_run(dly_in[i]);
             out[2u * i] += mulq15(l, rl) + mulq15(d, dlv);
             out[2u * i + 1u] += mulq15(r, rl) + mulq15(d, dlv);
@@ -850,4 +872,6 @@ static void mix_block(int32_t *out, uint32_t n)
     }
     sq.pos = end;
     sq.samples += n;
+    if (sq.overload)
+        sq.overload--;
 }
