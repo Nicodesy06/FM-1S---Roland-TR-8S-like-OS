@@ -1,0 +1,118 @@
+# A first beat on the 909 kit, then every page in both themes.
+turn PRESET 1
+shot 00_boot
+# BD on 1 5 9 13
+black 1
+key 1
+key 5
+key 9
+key 13
+expect step 1 5 1
+# SD on 5 13 with a flam on 13
+black 2
+key 5
+key 13
+# CH on every 8th, weak beats between
+black 7
+key 1
+key 3
+key 5
+key 7
+key 9
+key 11
+key 13
+key 15
+press OCT-
+key 16
+release OCT-
+# OH
+black 8
+key 3
+key 11
+# CP with sub steps on 16
+black 5
+key 13
+tap ENV
+key 16
+tap ENV
+expect sub 5 16 1
+# accents
+press SEL
+key 1
+key 9
+release SEL
+expect acc 1 1
+# RS with probability
+black 6
+key 7 down
+turn K3 -10
+turn K4 3
+shot 01_step_edit
+key 7 up
+expect step 6 7 1
+black 1
+shot 02_trrec
+tap PLAY
+wait 1200
+shot 03_playing
+turn K2 -8
+turn K3 10
+shot 04_knobs
+tap FX
+shot 05_fx
+tap FX
+tap EDIT
+shot 06_inst
+tap EDIT
+tap GLO
+shot 07_mixer
+tap GLO
+press SHIFT
+tap EDIT
+release SHIFT
+shot 08_track
+tap HOME
+press SHIFT
+tap SEQ
+release SHIFT
+shot 09_pattern_setting
+tap HOME
+tap SEQ
+shot 10_ptn_select
+tap SEQ
+press OCT+
+key 1
+key 2
+release OCT+
+wait 2500
+shot 11_chain
+tap ARP
+shot 12_inst_play
+tap REC
+key 1
+wait 300
+shot 13_inst_rec
+tap REC
+tap HOME
+press HOME
+wait 800
+release HOME
+shot 14_utility
+tap HOME
+theme 1
+shot 20_alloy_playing
+tap FX
+shot 21_alloy_fx
+tap FX
+black 2
+key 5 down
+shot 22_alloy_step
+key 5 up
+tap PLAY
+expect playing 0
+tap SAVE
+expect dirty 0
+reboot
+expect step 1 5 1
+expect step 2 13 1
+shot 23_after_reboot

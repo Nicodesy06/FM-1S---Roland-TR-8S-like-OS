@@ -1,0 +1,20 @@
+Drum recordings used by the sample-based kits (LM, DMX, DRMU, SP12 character kits).
+Licence: CC0 1.0 Universal (public domain dedication).
+Source: Versilian Studios VCSL, https://github.com/sgossner/VCSL (selected and trimmed for SLOOP by Leo Kuroshita / isod89).
+
+KIT/00_Tamb1_Hit_v2_rr1_Mid.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Hit_v2_rr1_Mid.wav
+KIT/01_Mid_ShakerDouble_Down_rr1.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Shaker, Small/Mid_ShakerDouble_Down_rr1.wav
+KIT/02_Conga_HitN_v2_rr1_Sum.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Conga/Conga_HitN_v2_rr1_Sum.wav
+KIT/03_Claves1_Hit_v2_rr1_Mid.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Claves/Claves1_Hit_v2_rr1_Mid.wav
+KIT/04_wood_click_mp.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Woodblock/wood_click_mp.wav
+KIT/10_kick_BDrumNew_hit_v5.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Bass Drum 1/BDrumNew_hit_v5_rr1_Sum.wav (mono, cut, normalised)
+KIT/11_snare_Snare2_HitSN_v7.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Snare Drum, Modern 1/Snare2_HitSN_v7_rr1_Mid.wav (mono, cut, normalised)
+KIT/12_rim_sidestick.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Legacy Snares/OldSnare/snare_rim.wav (mono, cut, normalised)
+KIT/13_clap_Clap_rr1.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Claps/Clap_rr1.wav (mono, cut, normalised)
+KIT/14_hihat_HitC_v3.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Hi-Hat Cymbal/HiHat_HitC_v3_rr1_Mid.wav (mono, cut, normalised)
+KIT/15_ohat_HitO.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Hi-Hat Cymbal/HiHat_HitO_rr1_Mid.wav (mono, cut, normalised)
+KIT/16_tomlo_TomL_HitS_v4.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Tom 2/Stick/TomL_HitS_v4_rr1_Mid.wav (mono, cut, normalised)
+KIT/17_tomhi_TomH_HitS_v4.wav  <-  sgossner/VCSL: Membranophones/Struck Membranophones/Tom 1/Stick/TomH_HitS_v4_rr1_Mid.wav (mono, cut, normalised)
+KIT/18_crash_susCymb2_hit_f1.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Suspended Cymbal 2/susCymb2_hit_f1.wav (mono, cut, normalised)
+KIT/19_ride_susCymb2_stick_mf1.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Suspended Cymbal 2/susCymb2_hit_stick_mf1.wav (mono, cut, normalised)
+KIT/20_cowbell_Cowbell1_Normal_v3.wav  <-  sgossner/VCSL: Idiophones/Struck Idiophones/Cowbells/Cowbell1_Normal_v3_rr1_Mid.wav (mono, cut, normalised)
